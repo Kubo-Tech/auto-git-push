@@ -55,7 +55,9 @@ def test_init_without_logger(config: AutoGitPushConfig) -> None:
 def test_run_git_commands_success(mock_run: MagicMock, pusher: AutoGitPusher) -> None:
     """gitコマンドが正常に実行される."""
     commit_result = MagicMock()
+    commit_result.returncode = 0
     commit_result.stdout = "1 file changed"
+    commit_result.stderr = ""
     mock_run.side_effect = [
         MagicMock(),  # git pull
         MagicMock(),  # git add
@@ -72,7 +74,9 @@ def test_run_git_commands_success(mock_run: MagicMock, pusher: AutoGitPusher) ->
 def test_run_git_commands_nothing_to_commit(mock_run: MagicMock, pusher: AutoGitPusher) -> None:
     """コミット対象がない場合にpushが実行されない."""
     commit_result = MagicMock()
+    commit_result.returncode = 1
     commit_result.stdout = "nothing to commit, working tree clean"
+    commit_result.stderr = ""
     mock_run.side_effect = [
         MagicMock(),  # git pull
         MagicMock(),  # git add
@@ -96,7 +100,9 @@ def test_run_git_commands_uses_custom_commit_message(mock_run: MagicMock) -> Non
     auto_pusher = AutoGitPusher(custom_config)
 
     commit_result = MagicMock()
+    commit_result.returncode = 0
     commit_result.stdout = "1 file changed"
+    commit_result.stderr = ""
     mock_run.side_effect = [
         MagicMock(),  # git pull
         MagicMock(),  # git add
@@ -139,6 +145,17 @@ def test_stop_without_start(pusher: AutoGitPusher) -> None:
     pusher.stop()
 
 
+@patch("auto_git_push.watcher.time.sleep")
+def test_delayed_commit_does_not_run_without_change(
+    mock_sleep: MagicMock, pusher: AutoGitPusher
+) -> None:
+    """変更フラグがない場合、遅延後もgit実行しない."""
+    with patch.object(pusher, "_run_git_commands") as mock_run_git_commands:
+        pusher._delayed_commit()
+    mock_sleep.assert_called_once_with(pusher._config.delay_seconds)
+    mock_run_git_commands.assert_not_called()
+
+
 # --- 準正常系 ---
 
 
@@ -150,4 +167,23 @@ def test_run_git_commands_raises_git_command_error(
     mock_run.side_effect = subprocess.CalledProcessError(1, "git pull")
 
     with pytest.raises(GitCommandError, match="gitコマンドの実行に失敗しました"):
+        pusher._run_git_commands()
+
+
+@patch("auto_git_push.watcher.subprocess.run")
+def test_run_git_commands_raises_when_commit_failed(
+    mock_run: MagicMock, pusher: AutoGitPusher
+) -> None:
+    """git commitが失敗し、nothing to commitでない場合にGitCommandErrorが発生する."""
+    commit_result = MagicMock()
+    commit_result.returncode = 1
+    commit_result.stdout = ""
+    commit_result.stderr = "fatal: some commit error"
+    mock_run.side_effect = [
+        MagicMock(),  # git pull
+        MagicMock(),  # git add
+        commit_result,  # git commit
+    ]
+
+    with pytest.raises(GitCommandError, match="git commit が失敗しました"):
         pusher._run_git_commands()

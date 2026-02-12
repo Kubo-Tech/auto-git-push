@@ -81,9 +81,21 @@ class AutoGitPusher:
                 encoding="utf-8",
             )
 
-            if result.stdout and "nothing to commit" in result.stdout.lower():
+            commit_stdout = result.stdout or ""
+            commit_stderr = result.stderr or ""
+            commit_output = f"{commit_stdout}\n{commit_stderr}".lower()
+
+            if "nothing to commit" in commit_output:
                 self._logger.info("コミット対象の変更がありません。pushをスキップします")
                 return
+
+            if result.returncode != 0:
+                error_message = (
+                    "git commit が失敗しました: "
+                    f"returncode={result.returncode}, stderr={commit_stderr.strip()}"
+                )
+                self._logger.error(error_message)
+                raise GitCommandError(error_message)
 
             subprocess.run(
                 ["git", "push", "origin", branch],
@@ -101,9 +113,15 @@ class AutoGitPusher:
     def _delayed_commit(self) -> None:
         """変更があってから一定時間後にGitコマンドを実行する."""
         time.sleep(self._config.delay_seconds)
+        should_run = False
         with self._lock:
             if self._change_detected:
                 self._change_detected = False
+                should_run = True
+
+        if not should_run:
+            return
+
         try:
             self._run_git_commands()
         except GitCommandError:
