@@ -27,6 +27,7 @@ class AutoGitPusher:
         _lock: スレッドロック
         _observer: watchdog Observer
         _stop_event: 終了フラグ
+        _commit_timer: デバウンス用タイマー
     """
 
     def __init__(
@@ -47,6 +48,7 @@ class AutoGitPusher:
         self._lock = threading.Lock()
         self._observer: Any = None
         self._stop_event = threading.Event()
+        self._commit_timer: threading.Timer | None = None
 
     def start(self) -> None:
         """ファイル監視を開始する.
@@ -138,16 +140,9 @@ class AutoGitPusher:
             raise GitCommandError(error_message) from error
 
     def _delayed_commit(self) -> None:
-        """変更があってから一定時間後にGitコマンドを実行する."""
-        time.sleep(self._config.delay_seconds)
-        should_run = False
+        """デバウンス後にGitコマンドを実行する."""
         with self._lock:
-            if self._change_detected:
-                self._change_detected = False
-                should_run = True
-
-        if not should_run:
-            return
+            self._change_detected = False
 
         try:
             self._run_git_commands()
@@ -160,15 +155,21 @@ class AutoGitPusher:
         Args:
             src_path: 変更されたファイルのパス
         """
-        current_time = time.time()
         with self._lock:
+            current_time = time.time()
             if current_time - self._last_event_time < self._config.ignore_seconds:
                 return
             self._last_event_time = current_time
             self._change_detected = True
 
+            if self._commit_timer is not None:
+                self._commit_timer.cancel()
+
+            self._commit_timer = threading.Timer(self._config.delay_seconds, self._delayed_commit)
+            self._commit_timer.daemon = True
+            self._commit_timer.start()
+
         self._logger.info("変更を検知しました: %s", src_path)
-        threading.Thread(target=self._delayed_commit, daemon=True).start()
 
 
 class _ChangeHandler(FileSystemEventHandler):
