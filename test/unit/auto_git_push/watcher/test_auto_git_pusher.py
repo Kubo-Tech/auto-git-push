@@ -116,11 +116,12 @@ def test_run_git_commands_uses_custom_commit_message(mock_run: MagicMock) -> Non
     assert custom_message in commit_call_args[0][0]
 
 
-def test_on_change_detected_sets_flag(pusher: AutoGitPusher) -> None:
-    """変更検知時にフラグがセットされる."""
-    with patch("auto_git_push.watcher.threading.Thread"):
+def test_on_change_detected_schedules_timer(pusher: AutoGitPusher) -> None:
+    """変更検知時にタイマーがスケジュールされる."""
+    with patch("auto_git_push.watcher.threading.Timer") as mock_timer:
         pusher._on_change_detected("/tmp/watch/test.txt")
-        assert pusher._change_detected is True
+        mock_timer.assert_called_once_with(pusher._config.delay_seconds, pusher._delayed_commit)
+        mock_timer.return_value.start.assert_called_once()
 
 
 def test_on_change_detected_ignores_rapid_events(pusher: AutoGitPusher) -> None:
@@ -132,28 +133,17 @@ def test_on_change_detected_ignores_rapid_events(pusher: AutoGitPusher) -> None:
     )
     slow_pusher = AutoGitPusher(slow_config)
 
-    with patch("auto_git_push.watcher.threading.Thread") as mock_thread:
+    with patch("auto_git_push.watcher.threading.Timer") as mock_timer:
         slow_pusher._on_change_detected("/tmp/watch/test1.txt")
-        first_call_count = mock_thread.call_count
+        first_call_count = mock_timer.call_count
 
         slow_pusher._on_change_detected("/tmp/watch/test2.txt")
-        assert mock_thread.call_count == first_call_count
+        assert mock_timer.call_count == first_call_count
 
 
 def test_stop_without_start(pusher: AutoGitPusher) -> None:
     """start前にstopを呼んでもエラーにならない."""
     pusher.stop()
-
-
-@patch("auto_git_push.watcher.time.sleep")
-def test_delayed_commit_does_not_run_without_change(
-    mock_sleep: MagicMock, pusher: AutoGitPusher
-) -> None:
-    """変更フラグがない場合、遅延後もgit実行しない."""
-    with patch.object(pusher, "_run_git_commands") as mock_run_git_commands:
-        pusher._delayed_commit()
-    mock_sleep.assert_called_once_with(pusher._config.delay_seconds)
-    mock_run_git_commands.assert_not_called()
 
 
 # --- 準正常系 ---
