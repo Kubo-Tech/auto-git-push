@@ -26,6 +26,7 @@ class AutoGitPusher:
         _last_event_time: 直近のイベント時刻
         _lock: スレッドロック
         _observer: watchdog Observer
+        _stop_event: 終了フラグ
     """
 
     def __init__(
@@ -45,6 +46,32 @@ class AutoGitPusher:
         self._last_event_time: float = 0.0
         self._lock = threading.Lock()
         self._observer: Any = None
+        self._stop_event = threading.Event()
+
+    def start(self) -> None:
+        """ファイル監視を開始する.
+
+        監視をブロッキングで開始する。Ctrl+Cで停止可能。
+        """
+        event_handler = _ChangeHandler(self)
+        self._observer = Observer()
+        self._observer.schedule(event_handler, self._config.watch_dir, recursive=True)
+        self._observer.start()
+        self._logger.info("ディレクトリを監視中: %s", self._config.watch_dir)
+
+        try:
+            while not self._stop_event.is_set():
+                time.sleep(1)
+        except KeyboardInterrupt:
+            self.stop()
+
+    def stop(self) -> None:
+        """ファイル監視を停止する."""
+        self._stop_event.set()
+        if self._observer is not None:
+            self._observer.stop()
+            self._observer.join()
+            self._logger.info("監視を停止しました")
 
     def _run_git_commands(self) -> None:
         """Gitの自動コミットとプッシュを実行する.
@@ -142,30 +169,6 @@ class AutoGitPusher:
 
         self._logger.info("変更を検知しました: %s", src_path)
         threading.Thread(target=self._delayed_commit, daemon=True).start()
-
-    def start(self) -> None:
-        """ファイル監視を開始する.
-
-        監視をブロッキングで開始する。Ctrl+Cで停止可能。
-        """
-        event_handler = _ChangeHandler(self)
-        self._observer = Observer()
-        self._observer.schedule(event_handler, self._config.watch_dir, recursive=True)
-        self._observer.start()
-        self._logger.info("ディレクトリを監視中: %s", self._config.watch_dir)
-
-        try:
-            while True:
-                time.sleep(10)
-        except KeyboardInterrupt:
-            self.stop()
-
-    def stop(self) -> None:
-        """ファイル監視を停止する."""
-        if self._observer is not None:
-            self._observer.stop()
-            self._observer.join()
-            self._logger.info("監視を停止しました")
 
 
 class _ChangeHandler(FileSystemEventHandler):
