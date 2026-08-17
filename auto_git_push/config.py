@@ -13,10 +13,10 @@ from dotenv import load_dotenv
 
 from auto_git_push.exceptions import ConfigError
 
-# デフォルトのコミットメッセージ生成関数
-_DEFAULT_COMMIT_MESSAGE_FN: Callable[[], str] = lambda: (
-    f"{datetime.now().strftime('%Y-%m-%d %H:%M')} auto push"
-)
+
+def _default_commit_message() -> str:
+    """デフォルトのコミットメッセージを生成する."""
+    return f"{datetime.now().strftime('%Y-%m-%d %H:%M')} auto push"
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ class AutoGitPushConfig:
     branch: str = "main"
     delay_seconds: int = 30
     ignore_seconds: int = 5
-    commit_message_fn: Callable[[], str] = field(default=_DEFAULT_COMMIT_MESSAGE_FN)
+    commit_message_fn: Callable[[], str] = field(default=_default_commit_message)
 
     def __post_init__(self) -> None:
         """設定値のバリデーションを行う.
